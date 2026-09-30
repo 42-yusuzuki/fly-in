@@ -16,11 +16,16 @@ class FlowEdge:
 class FlowGraph:
     """Directed residual graph."""
 
-    def __init__(self, node_count: int) -> None:
-        """Initialize graph."""
+    def __init__(self, node_count: int = 0) -> None:
+        """Initialize graph with an optional initial node count."""
         self.adjacency: list[list[FlowEdge]] = [
             [] for _ in range(node_count)
         ]
+
+    def add_node(self) -> int:
+        """Add a new node to the graph and return its id."""
+        self.adjacency.append([])
+        return len(self.adjacency) - 1
 
     def add_edge(self, source: int, target: int, capacity: int) -> None:
         """Add a residual edge pair."""
