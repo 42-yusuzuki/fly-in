@@ -1,12 +1,49 @@
+# Virtual environment
 .venv/
+
+# Python cache / bytecode
 __pycache__/
 *.py[cod]
+*$py.class
 
+# Test / type-check / lint caches
 .pytest_cache/
 .mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
 
+# Build artifacts
 build/
 dist/
 *.egg-info/
 
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
 .DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+*.log
+
+# Local-only scripts
+*.local.sh
+
+# Project scratch area
+scratch/
+tmp/
