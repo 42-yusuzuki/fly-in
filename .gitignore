@@ -47,3 +47,6 @@ Thumbs.db
 # Project scratch area
 scratch/
 tmp/
+
+# Generated graphical visualization output
+flyin_visualization.html

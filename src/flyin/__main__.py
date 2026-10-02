@@ -9,15 +9,23 @@ from flyin.simulation.formatter import SimulationFormatter
 from flyin.simulation.simulation import Simulation
 from flyin.solver.errors import FlyInSolutionError
 from flyin.solver.solver import FlyInSolver
+from flyin.visualization.graphical import GraphicalVisualizer
+from flyin.visualization.gui.app import run_gui
 from flyin.visualization.terminal import TerminalVisualizer
+
+_USAGE = "Usage: fly-in <map_file> [--gui | --html-gui]"
+_VALID_FLAGS = {"--gui", "--html-gui"}
 
 
 def main() -> None:
     """Run Fly-in."""
-    if len(sys.argv) != 2:
-        print("Usage: fly-in <map_file>")
+    if len(sys.argv) not in (2, 3) or (
+        len(sys.argv) == 3 and sys.argv[2] not in _VALID_FLAGS
+    ):
+        print(_USAGE)
         raise SystemExit(1)
 
+    flag = sys.argv[2] if len(sys.argv) == 3 else None
     map_path = Path(sys.argv[1])
 
     try:
@@ -37,6 +45,15 @@ def main() -> None:
     TerminalVisualizer().display(simulation)
     print()
     print(SimulationFormatter().format(simulation))
+
+    if flag == "--html-gui":
+        visualizer = GraphicalVisualizer()
+        output_path = Path("flyin_visualization.html")
+        visualizer.render(flyin_map, simulation, output_path)
+        print(f"\nGraphical visualization written to {output_path}")
+        visualizer.open_in_browser(output_path)
+    elif flag == "--gui":
+        run_gui(flyin_map, simulation)
 
 
 if __name__ == "__main__":

@@ -23,6 +23,8 @@ solved with Dinic's algorithm.
 ```bash
 make install        # uv sync
 make run ARGS=maps/subject-example.flyin
+make run ARGS="maps/subject-example.flyin --gui"       # open the PySide6 GUI
+make run ARGS="maps/subject-example.flyin --html-gui"  # open the HTML graphical view
 make test           # pytest
 make lint           # flake8 + mypy
 make lint-strict     # flake8 + mypy --strict
@@ -36,6 +38,37 @@ A handful of hand-written sample maps live in `maps/`:
 - `maps/easy-linear.flyin`, `maps/easy-fork.flyin`,
   `maps/easy-capacity.flyin` — small maps matching the "Easy" performance
   benchmarks (§VII.7).
+
+`maps/official/` additionally holds the full benchmark set distributed
+with the subject (`easy/`, `medium/`, `hard/`, `challenger/`).
+
+## Benchmark results
+
+Measured with `make run ARGS=maps/official/<...>`, against the targets
+in §VII.7:
+
+| Map | Drones | Turns | Target | Time |
+|---|---|---|---|---|
+| easy/01_linear_path | 2 | 4 | < 10 | 0.1s |
+| easy/02_simple_fork | 4 | 4 | < 10 | 0.1s |
+| easy/03_basic_capacity | 4 | 4 | < 10 | 0.1s |
+| medium/01_dead_end_trap | 5 | 8 | 10-30 | 0.1s |
+| medium/02_circular_loop | 6 | 10 | 10-30 | 0.1s |
+| medium/03_priority_puzzle | 5 | 6 | 10-30 | 0.1s |
+| hard/01_maze_nightmare | 8 | 13 | < 60 | 0.1s |
+| hard/02_capacity_hell | 12 | 16 | < 60 | 0.1s |
+| hard/03_ultimate_challenge | 15 | 26 | < 60 | 0.3s |
+| challenger/01_the_impossible_dream | 25 | **43** | ref. 45 | 1.8s |
+
+Every map is solved in well under a second except the 25-drone
+challenger map, and every result matches or beats its target — the
+challenger map beats the reference record of 45 turns. This is not a
+coincidence of the specific maps: because the solver's binary search
+finds the smallest `T` for which a `T`-turn max-flow equals
+`drone_count` (see "Technical choices" below), the turn count it
+reports is *provably* the minimum possible under the modeled rules, not
+a heuristic's best effort. There is, by construction, no routing that
+reaches the goal in fewer turns than what it prints.
 
 ## Example
 
@@ -131,12 +164,37 @@ through it one at a time — 6 turns, within the subject's `<= 8` target.)
 
 ## Visual representation
 
-`visualization/terminal.py` prints the simulation turn by turn, coloring
-each `D<id>-<location>` entry by drone id (ANSI colors, cycling through
-six hues) so that simultaneous, overlapping drone movements stay easy to
-tell apart at a glance in the terminal. It is built on top of
-`SimulationFormatter`, so the colored view and the plain subject-format
-output are guaranteed to show exactly the same turns and moves.
+Both options from §VII.1 are implemented, with two flavors of graphical
+interface:
+
+- **Colored terminal output** (`visualization/terminal.py`, always on) —
+  prints the simulation turn by turn, coloring each `D<id>-<location>`
+  entry by drone id (ANSI colors, cycling through six hues) so that
+  simultaneous, overlapping drone movements stay easy to tell apart at a
+  glance. It is built on top of `SimulationFormatter`, so the colored
+  view and the plain subject-format output are guaranteed to show
+  exactly the same turns and moves.
+- **Native GUI** (`visualization/gui/`, opt-in via `--gui`) — a PySide6
+  desktop app built on `QGraphicsView`/`QGraphicsScene`. Zones are laid
+  out from their `x`/`y` coordinates and colored by type (or by their
+  `color` metadata when present), with a dashed outline and a
+  START/END label on the start/end zones and a `cap N` label on any
+  zone with `max_drones > 1`. Connections are drawn as lines, labeled
+  `xN` when `max_link_capacity > 1`. Drones are small colored dots
+  labeled with their id; a drone in flight toward a restricted zone is
+  drawn at the midpoint of the connection it is crossing, and drones
+  sharing a zone are spread in a small circle so none fully overlap.
+  Playback controls (Play/Pause, Next/Previous turn, Reset, a speed
+  selector, and a turn counter) are driven entirely by `QTimer`s in
+  `MainWindow`; turn-to-turn drone movement is linearly interpolated for
+  a short animation, but this only moves `QGraphicsItem`s on screen —
+  `GraphScene` always derives positions from the already-solved
+  `Simulation`, which it only ever reads, never mutates or recomputes.
+- **HTML view** (`visualization/graphical.py`, opt-in via `--html-gui`)
+  — the original self-contained single-file visualization (same idea,
+  rendered as SVG/JS with a turn slider), kept as a no-dependency,
+  no-display-server fallback that works from any browser, including on
+  a peer reviewer's machine with no GUI toolkit installed.
 
 ## Resources
 
@@ -150,9 +208,10 @@ output are guaranteed to show exactly the same turns and moves.
 
 **AI usage**: Claude (Anthropic) was used as a pair-programming aid for:
 reading and summarizing this project's subject PDF into a structured
-spec; writing the parser, solver, flow-decomposer, formatter and
-terminal-visualization modules against that spec and the existing
-`graph`/`domain` code; and writing the accompanying `pytest` test suite.
+spec; writing the parser, solver, flow-decomposer, formatter,
+terminal-visualization and HTML graphical-visualization modules against
+that spec and the existing `graph`/`domain` code; and writing the
+accompanying `pytest` test suite.
 The existing `graph/` (generic `FlowGraph` + `Dinic`) and
 `solver/time_expanded.py` modules predate this AI-assisted session. All
 generated code was reviewed, run against `make lint-strict` and

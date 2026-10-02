@@ -4,7 +4,9 @@ version = "0.1.0"
 description = "Drone routing simulation for the 42 Fly-in project"
 readme = "README.md"
 requires-python = ">=3.10"
-dependencies = []
+dependencies = [
+    "pyside6>=6.11.2",
+]
 
 [project.scripts]
 fly-in = "flyin.__main__:main"
