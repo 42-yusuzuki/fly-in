@@ -1,0 +1,9 @@
+# Easy: single capacity-2 bottleneck, 4 drones. Target: <= 6 turns.
+nb_drones: 4
+
+start_hub: start 0 0
+hub: gate 1 0 [max_drones=2]
+end_hub: goal 2 0
+
+connection: start-gate
+connection: gate-goal

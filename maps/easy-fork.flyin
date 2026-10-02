@@ -1,0 +1,14 @@
+# Easy: simple fork, 4 drones. Target: <= 8 turns. (subject figure VII.1)
+nb_drones: 4
+
+start_hub: start 0 0
+hub: junction 1 0
+hub: pathA 2 1
+hub: pathB 2 -1
+end_hub: goal 3 0
+
+connection: start-junction
+connection: junction-pathA
+connection: junction-pathB
+connection: pathA-goal
+connection: pathB-goal

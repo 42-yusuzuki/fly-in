@@ -22,3 +22,4 @@ class Zone:
     y: int
     zone_type: ZoneType
     max_drones: int
+    color: str | None = None
