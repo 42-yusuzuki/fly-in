@@ -28,7 +28,10 @@ def progress_bar(turn: int, total_turns: int, width: int = _BAR_WIDTH) -> str:
 
 
 def build_status_text(
-    visual_map: VisualMap, snapshot: TurnSnapshot, total_turns: int,
+    visual_map: VisualMap,
+    snapshot: TurnSnapshot,
+    total_turns: int,
+    playback: str | None = None,
 ) -> Text:
     """Return the status panel contents for one turn.
 
@@ -41,6 +44,8 @@ def build_status_text(
 
     _heading(text, "TURN")
     _row(text, "Turn", f"{snapshot.turn} / {total_turns}")
+    if playback is not None:
+        _row(text, "Playback", playback)
     text.append(f"{progress_bar(snapshot.turn, total_turns)}\n",
                 palette.CAPACITY_STYLE)
     _count(text, DroneActivity.WAITING, "Waiting",
@@ -128,7 +133,7 @@ def _legend(text: Text, glyph: str, style: str, label: str, value: str) -> None:
 
 
 class StatusPanel(Static):
-    """Panel showing turn counts, map metadata, legend, and moves."""
+    """Panel showing turn and playback state, map metadata, legend, moves."""
 
     def __init__(
         self,
@@ -151,8 +156,10 @@ class StatusPanel(Static):
         self._visual_map = visual_map
         self._total_turns = total_turns
 
-    def show(self, snapshot: TurnSnapshot) -> None:
+    def show(self, snapshot: TurnSnapshot, playback: str | None = None) -> None:
         """Replace the contents with the given turn's status."""
         self.update(
-            build_status_text(self._visual_map, snapshot, self._total_turns),
+            build_status_text(
+                self._visual_map, snapshot, self._total_turns, playback,
+            ),
         )

@@ -9,6 +9,7 @@ from textual.widgets import Static
 from flyin.parser.parser import FlyInParser
 from flyin.simulation.simulation import Simulation
 from flyin.solver.solver import FlyInSolver
+from flyin.visualization.tui.animation import TURN_DURATION
 from flyin.visualization.tui.app import FlyInVisualizerApp
 from flyin.visualization.tui.model import VisualMap
 from flyin.visualization.tui.snapshot import TurnSnapshot, build_snapshots
@@ -86,6 +87,40 @@ def test_arrow_keys_step_through_turns() -> None:
             assert app.turn == 0
             panel = app.query_one(StatusPanel)
             assert f"Turn         0 / {last}" in str(panel.render())
+
+    asyncio.run(scenario())
+
+
+def test_space_plays_until_the_end_and_restart_pauses() -> None:
+    async def scenario() -> None:
+        # A near-zero frame rate keeps the real clock out of the way, so
+        # playback only moves when the test calls advance().
+        app = FlyInVisualizerApp(_visual_map(), _snapshots(), frame_rate=1e-6)
+        last = app.last_turn
+        async with app.run_test(size=(120, 40)) as pilot:
+            title = app.query_one("#title-bar", Static)
+            await pilot.press("space")
+            assert app.playback.playing
+            assert "Playing 1x" in str(title.render())
+
+            app.advance(TURN_DURATION * 1.5)
+            assert app.turn == 2
+            assert app.playback.progress == pytest.approx(0.5)
+
+            await pilot.press("space")
+            app.advance(TURN_DURATION * 10)
+            assert app.turn == 2
+            assert "Paused 1x" in str(title.render())
+
+            await pilot.press("plus", "plus", "minus")
+            assert app.playback.speed == 2.0
+
+            await pilot.press("space")
+            app.advance(TURN_DURATION * 100)
+            assert app.turn == last and not app.playback.playing
+
+            await pilot.press("r")
+            assert (app.turn, app.playback.playing) == (0, False)
 
     asyncio.run(scenario())
 

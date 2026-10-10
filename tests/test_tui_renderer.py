@@ -181,3 +181,21 @@ def test_badge_moves_below_rather_than_covering_a_label() -> None:
     assert "abc" in plain[1]
     assert "D1" not in plain[1]
     assert plain[3].index("D1") == plain[2].index("◉")
+
+
+def test_moving_drone_is_drawn_between_zones_mid_turn() -> None:
+    path = [("start", False), ("A", False)]
+    visual = VisualMap.from_flyin_map(_linear_map(), "test")
+    renderer = GraphRenderer(visual)
+    before, after = _turn(0, path), _turn(1, path)
+
+    def badge_x(progress: float) -> int:
+        lines = renderer.render(40, 4, after, before, progress).plain_lines()
+        row = next(line for line in lines if "D1" in line)
+        return row.index("D1")
+
+    start, middle, end = badge_x(0.0), badge_x(0.5), badge_x(1.0)
+
+    assert start < middle < end
+    lines = renderer.render(40, 4, after, before, 1.0).plain_lines()
+    assert lines == renderer.render(40, 4, after).plain_lines()

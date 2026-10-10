@@ -98,18 +98,8 @@ class TurnSnapshot:
         )
 
     def transit_groups(self) -> dict[tuple[str, str], tuple[DroneSnapshot, ...]]:
-        """Group in-transit drones by connection, in either direction.
-
-        Keys are the connection's endpoints in sorted order, so drones
-        crossing the same connection in opposite directions share a
-        group (they share a single drawn edge too).
-        """
-        groups: dict[tuple[str, str], list[DroneSnapshot]] = {}
-        for drone in self.in_transit():
-            if drone.link is not None:
-                key = (min(drone.link), max(drone.link))
-                groups.setdefault(key, []).append(drone)
-        return {key: tuple(drones) for key, drones in groups.items()}
+        """Group this turn's in-transit drones by connection."""
+        return group_by_link(self.in_transit())
 
     def movers(self) -> tuple[DroneSnapshot, ...]:
         """Return the drones that used a connection during this turn."""
@@ -121,6 +111,24 @@ class TurnSnapshot:
             frozenset(drone.link)
             for drone in self.drones if drone.link is not None
         )
+
+
+def group_by_link(
+    drones: tuple[DroneSnapshot, ...],
+) -> dict[tuple[str, str], tuple[DroneSnapshot, ...]]:
+    """Group drones by the connection they use, in either direction.
+
+    Keys are the connection's endpoints in sorted order, so drones
+    crossing the same connection in opposite directions share a group
+    (they share a single drawn edge too). Drones without a link are
+    skipped.
+    """
+    groups: dict[tuple[str, str], list[DroneSnapshot]] = {}
+    for drone in drones:
+        if drone.link is not None:
+            key = (min(drone.link), max(drone.link))
+            groups.setdefault(key, []).append(drone)
+    return {key: tuple(members) for key, members in groups.items()}
 
 
 def build_snapshots(simulation: Simulation, goal: str) -> tuple[TurnSnapshot, ...]:

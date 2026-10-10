@@ -7,13 +7,22 @@ same result as drawing them beneath those layers without leaving
 partial marks.
 """
 
+import math
+
 from flyin.visualization.tui import palette
+from flyin.visualization.tui.animation import (
+    Anchor,
+    DroneMotion,
+    interpolate,
+    turn_motions,
+)
 from flyin.visualization.tui.canvas import CellCanvas, raster_line
 from flyin.visualization.tui.model import VisualMap, VisualZone
 from flyin.visualization.tui.snapshot import (
     DroneActivity,
     DroneSnapshot,
     TurnSnapshot,
+    group_by_link,
 )
 from flyin.visualization.tui.viewport import Viewport
 
@@ -115,21 +124,34 @@ class GraphRenderer:
             visual_map: Map to draw. It is only read.
         """
         self._map = visual_map
+        self._layout_cache: tuple[tuple[int, int], dict[str, Point]] | None = None
 
     def layout(self, width: int, height: int) -> dict[str, Point]:
-        """Return the screen cell of every zone for a viewport size."""
+        """Return the screen cell of every zone for a viewport size.
+
+        The result is cached until the size changes, since it is needed
+        on every animation frame.
+        """
+        if self._layout_cache is not None and self._layout_cache[0] == (
+            width, height,
+        ):
+            return self._layout_cache[1]
         viewport = Viewport(self._map.bounds, width, height)
         ideal = {
             zone.name: viewport.to_cell(zone.world_x, zone.world_y)
             for zone in self._map.zones
         }
-        return place_zones(ideal, width, height)
+        cells = place_zones(ideal, width, height)
+        self._layout_cache = ((width, height), cells)
+        return cells
 
     def render(
         self,
         width: int,
         height: int,
         snapshot: TurnSnapshot | None = None,
+        previous: TurnSnapshot | None = None,
+        progress: float = 1.0,
     ) -> CellCanvas:
         """Draw the graph, plus the drones of ``snapshot`` if given.
 
@@ -138,6 +160,10 @@ class GraphRenderer:
             height: Canvas height in rows.
             snapshot: Turn whose drones, used connections, and zone
                 occupancy are drawn; ``None`` draws the bare topology.
+            previous: Turn before ``snapshot``, needed to animate the
+                moves into it; ``None`` draws ``snapshot`` at rest.
+            progress: How far the moves into ``snapshot`` have gone,
+                from 0.0 (looks like ``previous``) to 1.0 (at rest).
         """
         canvas = CellCanvas(width, height)
         if width == 0 or height == 0:
@@ -150,7 +176,14 @@ class GraphRenderer:
         occupied = self._draw_labels(canvas, cells)
         self._draw_connection_capacities(canvas, cells, occupied)
         if snapshot is not None:
-            self._draw_drones(canvas, cells, snapshot, occupied)
+            if previous is None or progress >= 1.0:
+                motions: tuple[DroneMotion, ...] = ()
+                stationary = tuple(d for d in snapshot.drones if d.on_map)
+            else:
+                motions, stationary = turn_motions(previous, snapshot)
+            self._draw_drones(
+                canvas, cells, stationary, motions, progress, occupied,
+            )
         return canvas
 
     def _draw_connections(
@@ -217,40 +250,79 @@ class GraphRenderer:
         self,
         canvas: CellCanvas,
         cells: dict[str, Point],
-        snapshot: TurnSnapshot,
+        stationary: tuple[DroneSnapshot, ...],
+        motions: tuple[DroneMotion, ...],
+        progress: float,
         decorated: set[Point],
     ) -> None:
-        """Draw one badge per occupied zone and per busy connection.
+        """Draw resting drones as grouped badges, then moving ones.
 
         Zone badges go just above their node (or below when that row is
-        taken); transit badges sit on the middle of their connection.
-        A badge avoids the ``decorated`` cells (labels and capacity
-        marks) when it can, and never covers a node or another badge
-        when any candidate spot is free.
+        taken); badges of drones resting in transit sit on the middle of
+        their connection. Moving drones glide between those same badge
+        spots. A badge avoids the ``decorated`` cells (labels and
+        capacity marks) when it can, and never covers a node or another
+        badge when any candidate spot is free.
         """
         blocked: set[Point] = set(cells.values())
 
         for zone in self._map.zones:
-            drones = snapshot.drones_at(zone.name)
-            if not drones:
-                continue
-            x, y = cells[zone.name]
-            text = badge_text(drones)
-            start_x = x - (len(text) - 1) // 2
-            spots = [(start_x, y - 1), (start_x, y + 1)]
-            self._place_badge(
-                canvas, text, badge_style(drones), spots, blocked, decorated,
+            drones = tuple(d for d in stationary if d.zone == zone.name)
+            if drones:
+                x, y = cells[zone.name]
+                self._draw_badge(
+                    canvas, drones, (x, y - 1), [0, 2], blocked, decorated,
+                )
+
+        in_transit = tuple(d for d in stationary if d.zone is None)
+        for (zone_a, zone_b), drones in group_by_link(in_transit).items():
+            mid = self._anchor_cell(Anchor.midpoint(zone_a, zone_b), cells)
+            self._draw_badge(canvas, drones, mid, [0, -1, 1], blocked, decorated)
+
+        moving: dict[Point, list[DroneSnapshot]] = {}
+        for motion in motions:
+            screen_x, screen_y = interpolate(
+                self._anchor_cell(motion.start, cells),
+                self._anchor_cell(motion.end, cells),
+                progress,
+            )
+            cell = (math.floor(screen_x + 0.5), math.floor(screen_y + 0.5))
+            moving.setdefault(cell, []).append(motion.drone)
+        for cell, group in moving.items():
+            self._draw_badge(
+                canvas, tuple(group), cell, [0, -1, 1], blocked, decorated,
             )
 
-        for (zone_a, zone_b), drones in snapshot.transit_groups().items():
-            line = raster_line(*cells[zone_a], *cells[zone_b])
-            mid_x, mid_y = line[len(line) // 2]
-            text = badge_text(drones)
-            start_x = mid_x - (len(text) - 1) // 2
-            spots = [(start_x, mid_y), (start_x, mid_y - 1), (start_x, mid_y + 1)]
-            self._place_badge(
-                canvas, text, badge_style(drones), spots, blocked, decorated,
-            )
+    @staticmethod
+    def _anchor_cell(anchor: Anchor, cells: dict[str, Point]) -> Point:
+        """Return the badge center for a zone or a connection midpoint.
+
+        A zone's badge sits on the row above its node, so a drone at
+        rest and a drone arriving there line up.
+        """
+        if anchor.other is None:
+            x, y = cells[anchor.zone]
+            return x, y - 1
+        line = raster_line(*cells[anchor.zone], *cells[anchor.other])
+        return line[len(line) // 2]
+
+    def _draw_badge(
+        self,
+        canvas: CellCanvas,
+        drones: tuple[DroneSnapshot, ...],
+        center: Point,
+        row_offsets: list[int],
+        blocked: set[Point],
+        decorated: set[Point],
+    ) -> None:
+        """Draw a group's badge centered on ``center``, trying each row."""
+        text = badge_text(drones)
+        x, y = center
+        start_x = x - (len(text) - 1) // 2
+        spots = [(start_x, y + offset) for offset in row_offsets]
+        self._place_badge(
+            canvas, text, badge_style(drones), spots, blocked, decorated,
+        )
 
     @staticmethod
     def _place_badge(

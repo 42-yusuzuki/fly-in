@@ -29,10 +29,10 @@ def canvas_to_text(canvas: CellCanvas) -> Text:
 
 
 class GraphView(Widget):
-    """Draw the map and the drones of the selected turn, sized to the widget.
+    """Draw the map and the drones of the selected frame, sized to the widget.
 
-    The rendered text is cached per widget size and turn, so the graph
-    is only re-rasterized on resize or when the turn changes.
+    The rendered text is cached per widget size and frame, so the graph
+    is only re-rasterized on resize or when the frame changes.
     """
 
     def __init__(
@@ -52,19 +52,37 @@ class GraphView(Widget):
         super().__init__(id=widget_id)
         self._renderer = GraphRenderer(visual_map)
         self._snapshot = snapshot
-        self._cache: tuple[tuple[int, int, int | None], Text] | None = None
+        self._previous: TurnSnapshot | None = None
+        self._progress = 1.0
+        self._cache: tuple[tuple[int, int, int | None, float], Text] | None = None
 
-    def show(self, snapshot: TurnSnapshot) -> None:
-        """Switch to another turn and redraw."""
+    def show(
+        self,
+        snapshot: TurnSnapshot,
+        previous: TurnSnapshot | None = None,
+        progress: float = 1.0,
+    ) -> None:
+        """Switch to another frame and redraw.
+
+        Args:
+            snapshot: Turn being shown (or animated into).
+            previous: Turn before it, needed while animating.
+            progress: Interpolation from ``previous`` (0.0) to
+                ``snapshot`` (1.0).
+        """
         self._snapshot = snapshot
+        self._previous = previous
+        self._progress = progress
         self.refresh()
 
     def render(self) -> Text:
-        """Return the graph rendered for the current size and turn."""
+        """Return the graph rendered for the current size and frame."""
         width, height = self.content_size.width, self.content_size.height
         turn = self._snapshot.turn if self._snapshot else None
-        key = (width, height, turn)
+        key = (width, height, turn, self._progress)
         if self._cache is None or self._cache[0] != key:
-            canvas = self._renderer.render(width, height, self._snapshot)
+            canvas = self._renderer.render(
+                width, height, self._snapshot, self._previous, self._progress,
+            )
             self._cache = (key, canvas_to_text(canvas))
         return self._cache[1]
