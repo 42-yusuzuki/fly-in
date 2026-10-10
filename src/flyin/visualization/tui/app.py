@@ -11,7 +11,9 @@ from textual.events import Resize
 from textual.widgets import Footer, Static
 
 from flyin.domain.map import FlyInMap
+from flyin.simulation.simulation import Simulation
 from flyin.visualization.tui.model import VisualMap
+from flyin.visualization.tui.snapshot import TurnSnapshot, build_snapshots
 from flyin.visualization.tui.widgets.graph_view import GraphView
 from flyin.visualization.tui.widgets.status_panel import StatusPanel
 
@@ -20,7 +22,7 @@ MIN_ROWS = 30
 
 
 class FlyInVisualizerApp(App[None]):
-    """Static terminal graph viewer for one Fly-in map (Milestone 1)."""
+    """Terminal viewer stepping through a solved simulation turn by turn."""
 
     TITLE = "Fly-in"
     CSS = """
@@ -60,25 +62,87 @@ class FlyInVisualizerApp(App[None]):
         display: block;
     }
     """
-    BINDINGS = [("q", "quit", "Quit")]
+    BINDINGS = [
+        ("left", "previous_turn", "Prev turn"),
+        ("right", "next_turn", "Next turn"),
+        ("home", "first_turn", "First"),
+        ("end", "last_turn", "Last"),
+        ("q", "quit", "Quit"),
+    ]
 
-    def __init__(self, visual_map: VisualMap) -> None:
+    def __init__(
+        self, visual_map: VisualMap, snapshots: tuple[TurnSnapshot, ...],
+    ) -> None:
         """Create the app for an already-built presentation model.
 
         Args:
             visual_map: Map to display.
+            snapshots: One snapshot per turn, starting at turn 0.
+
+        Raises:
+            ValueError: If ``snapshots`` is empty.
         """
+        if not snapshots:
+            raise ValueError("need at least the turn-0 snapshot")
         super().__init__()
         self._visual_map = visual_map
+        self._snapshots = snapshots
+        self._turn = 0
+
+    @property
+    def turn(self) -> int:
+        """Return the turn currently displayed."""
+        return self._turn
+
+    @property
+    def last_turn(self) -> int:
+        """Return the final turn of the simulation."""
+        return len(self._snapshots) - 1
 
     def compose(self) -> ComposeResult:
         """Lay out the title bar, graph, status panel, and footer."""
-        yield Static(f"Fly-in  {self._visual_map.title}", id="title-bar")
+        snapshot = self._snapshots[self._turn]
+        yield Static(self._title_text(), id="title-bar")
         with Horizontal(id="main"):
-            yield GraphView(self._visual_map, widget_id="graph")
-            yield StatusPanel(self._visual_map, widget_id="status")
+            yield GraphView(self._visual_map, snapshot, widget_id="graph")
+            yield StatusPanel(
+                self._visual_map, snapshot, self.last_turn, widget_id="status",
+            )
         yield Static("", id="too-small")
         yield Footer()
+
+    def action_next_turn(self) -> None:
+        """Show the next turn, stopping at the last one."""
+        self._go_to(self._turn + 1)
+
+    def action_previous_turn(self) -> None:
+        """Show the previous turn, stopping at turn 0."""
+        self._go_to(self._turn - 1)
+
+    def action_first_turn(self) -> None:
+        """Jump to turn 0."""
+        self._go_to(0)
+
+    def action_last_turn(self) -> None:
+        """Jump to the final turn."""
+        self._go_to(self.last_turn)
+
+    def _go_to(self, turn: int) -> None:
+        """Display ``turn``, clamped to the simulated range."""
+        turn = min(max(turn, 0), self.last_turn)
+        if turn == self._turn:
+            return
+        self._turn = turn
+        snapshot = self._snapshots[turn]
+        self.query_one(GraphView).show(snapshot)
+        self.query_one(StatusPanel).show(snapshot)
+        self.query_one("#title-bar", Static).update(self._title_text())
+
+    def _title_text(self) -> str:
+        return (
+            f"Fly-in  {self._visual_map.title}"
+            f"    Turn {self._turn} / {self.last_turn}"
+        )
 
     def on_mount(self) -> None:
         """Apply the minimum-size check for the initial terminal size."""
@@ -99,11 +163,17 @@ class FlyInVisualizerApp(App[None]):
             )
 
 
-def run_visualizer(flyin_map: FlyInMap, title: str) -> None:
-    """Open the terminal graph viewer for a parsed map and block until quit.
+def run_visualizer(
+    flyin_map: FlyInMap, simulation: Simulation, title: str,
+) -> None:
+    """Open the terminal viewer for a solved map and block until quit.
 
     Args:
         flyin_map: Parsed map to display. It is only read.
+        simulation: Solved simulation to step through. It is only read.
         title: Short name shown in the title bar (e.g. the file name).
     """
-    FlyInVisualizerApp(VisualMap.from_flyin_map(flyin_map, title)).run()
+    FlyInVisualizerApp(
+        VisualMap.from_flyin_map(flyin_map, title),
+        build_snapshots(simulation, flyin_map.goal),
+    ).run()

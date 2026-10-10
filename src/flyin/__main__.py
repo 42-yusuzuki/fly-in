@@ -56,7 +56,7 @@ def main() -> None:
     elif flag == "--gui":
         run_gui(flyin_map, simulation)
     elif flag == "--visualize":
-        run_visualizer(flyin_map, map_path.name)
+        run_visualizer(flyin_map, simulation, map_path.name)
 
 
 if __name__ == "__main__":

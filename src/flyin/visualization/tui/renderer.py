@@ -1,14 +1,20 @@
-"""Static graph rendering onto a :class:`CellCanvas`.
+"""Graph rendering onto a :class:`CellCanvas`.
 
 Layer priority follows the visualizer design: connections, connection
-metadata, zones, then zone labels. Capacity marks are drawn last but
-only onto cells no node or label uses, which yields the same result as
-drawing them beneath those layers without leaving partial marks.
+metadata, zones, zone labels, then drones. Capacity marks are drawn
+after labels but only onto cells no node or label uses, which yields the
+same result as drawing them beneath those layers without leaving
+partial marks.
 """
 
 from flyin.visualization.tui import palette
-from flyin.visualization.tui.canvas import CellCanvas
+from flyin.visualization.tui.canvas import CellCanvas, raster_line
 from flyin.visualization.tui.model import VisualMap, VisualZone
+from flyin.visualization.tui.snapshot import (
+    DroneActivity,
+    DroneSnapshot,
+    TurnSnapshot,
+)
 from flyin.visualization.tui.viewport import Viewport
 
 #: How far (in cells) a zone may be nudged when its ideal cell is taken.
@@ -76,8 +82,31 @@ def _nearest_free(
     return cell
 
 
+def badge_text(drones: tuple[DroneSnapshot, ...]) -> str:
+    """Return the label for a group of drones drawn at one spot.
+
+    A single drone shows its id (``D3``); a group shows its size
+    (``D×4``) so the badge stays short on crowded zones.
+    """
+    if len(drones) == 1:
+        return f"D{drones[0].drone_id}"
+    return f"D×{len(drones)}"
+
+
+def badge_style(drones: tuple[DroneSnapshot, ...]) -> str:
+    """Return the badge style, letting the most eventful drone win."""
+    activities = {drone.activity for drone in drones}
+    if DroneActivity.ARRIVED in activities:
+        return palette.DRONE_ARRIVED_STYLE
+    if DroneActivity.MOVING in activities:
+        return palette.DRONE_MOVING_STYLE
+    if DroneActivity.IN_TRANSIT in activities:
+        return palette.DRONE_TRANSIT_STYLE
+    return palette.DRONE_WAITING_STYLE
+
+
 class GraphRenderer:
-    """Render the static topology of a :class:`VisualMap`."""
+    """Render a :class:`VisualMap`, optionally with drones at one turn."""
 
     def __init__(self, visual_map: VisualMap) -> None:
         """Create a renderer for one map.
@@ -96,26 +125,49 @@ class GraphRenderer:
         }
         return place_zones(ideal, width, height)
 
-    def render(self, width: int, height: int) -> CellCanvas:
-        """Draw connections, capacities, zones, and labels to a new canvas."""
+    def render(
+        self,
+        width: int,
+        height: int,
+        snapshot: TurnSnapshot | None = None,
+    ) -> CellCanvas:
+        """Draw the graph, plus the drones of ``snapshot`` if given.
+
+        Args:
+            width: Canvas width in columns.
+            height: Canvas height in rows.
+            snapshot: Turn whose drones, used connections, and zone
+                occupancy are drawn; ``None`` draws the bare topology.
+        """
         canvas = CellCanvas(width, height)
         if width == 0 or height == 0:
             return canvas
 
         cells = self.layout(width, height)
-        self._draw_connections(canvas, cells)
-        self._draw_zones(canvas, cells)
+        used = snapshot.used_links() if snapshot else frozenset()
+        self._draw_connections(canvas, cells, used)
+        self._draw_zones(canvas, cells, snapshot)
         occupied = self._draw_labels(canvas, cells)
         self._draw_connection_capacities(canvas, cells, occupied)
+        if snapshot is not None:
+            self._draw_drones(canvas, cells, snapshot, occupied)
         return canvas
 
     def _draw_connections(
-        self, canvas: CellCanvas, cells: dict[str, Point],
+        self,
+        canvas: CellCanvas,
+        cells: dict[str, Point],
+        used: frozenset[frozenset[str]],
     ) -> None:
         for connection in self._map.connections:
             x1, y1 = cells[connection.zone_a]
             x2, y2 = cells[connection.zone_b]
-            canvas.line(x1, y1, x2, y2, palette.CONNECTION_STYLE)
+            pair = frozenset((connection.zone_a, connection.zone_b))
+            style = (
+                palette.ACTIVE_CONNECTION_STYLE if pair in used
+                else palette.CONNECTION_STYLE
+            )
+            canvas.line(x1, y1, x2, y2, style)
 
     def _draw_connection_capacities(
         self,
@@ -144,10 +196,97 @@ class GraphRenderer:
             canvas.text(mid_x, mid_y, mark, palette.CAPACITY_STYLE)
             occupied |= mark_cells
 
-    def _draw_zones(self, canvas: CellCanvas, cells: dict[str, Point]) -> None:
+    def _draw_zones(
+        self,
+        canvas: CellCanvas,
+        cells: dict[str, Point],
+        snapshot: TurnSnapshot | None,
+    ) -> None:
         for zone in self._map.zones:
             x, y = cells[zone.name]
-            canvas.put(x, y, palette.zone_glyph(zone), palette.zone_style(zone))
+            style = palette.zone_style(zone)
+            if (
+                snapshot is not None
+                and zone.max_drones is not None
+                and len(snapshot.drones_at(zone.name)) >= zone.max_drones
+            ):
+                style += palette.FULL_ZONE_SUFFIX
+            canvas.put(x, y, palette.zone_glyph(zone), style)
+
+    def _draw_drones(
+        self,
+        canvas: CellCanvas,
+        cells: dict[str, Point],
+        snapshot: TurnSnapshot,
+        decorated: set[Point],
+    ) -> None:
+        """Draw one badge per occupied zone and per busy connection.
+
+        Zone badges go just above their node (or below when that row is
+        taken); transit badges sit on the middle of their connection.
+        A badge avoids the ``decorated`` cells (labels and capacity
+        marks) when it can, and never covers a node or another badge
+        when any candidate spot is free.
+        """
+        blocked: set[Point] = set(cells.values())
+
+        for zone in self._map.zones:
+            drones = snapshot.drones_at(zone.name)
+            if not drones:
+                continue
+            x, y = cells[zone.name]
+            text = badge_text(drones)
+            start_x = x - (len(text) - 1) // 2
+            spots = [(start_x, y - 1), (start_x, y + 1)]
+            self._place_badge(
+                canvas, text, badge_style(drones), spots, blocked, decorated,
+            )
+
+        for (zone_a, zone_b), drones in snapshot.transit_groups().items():
+            line = raster_line(*cells[zone_a], *cells[zone_b])
+            mid_x, mid_y = line[len(line) // 2]
+            text = badge_text(drones)
+            start_x = mid_x - (len(text) - 1) // 2
+            spots = [(start_x, mid_y), (start_x, mid_y - 1), (start_x, mid_y + 1)]
+            self._place_badge(
+                canvas, text, badge_style(drones), spots, blocked, decorated,
+            )
+
+    @staticmethod
+    def _place_badge(
+        canvas: CellCanvas,
+        text: str,
+        style: str,
+        spots: list[Point],
+        blocked: set[Point],
+        decorated: set[Point],
+    ) -> None:
+        """Draw ``text`` at the best spot, else clamped to the first.
+
+        The first spot clear of both ``blocked`` and ``decorated`` wins,
+        then the first clear of ``blocked`` only. Spots are shifted
+        horizontally to fit the canvas. ``blocked`` is updated with the
+        cells the badge now covers.
+        """
+        max_x = max(canvas.width - len(text), 0)
+        candidates = [
+            (min(max(x, 0), max_x), y) for x, y in spots
+        ]
+        chosen = None
+        for avoid in (blocked | decorated, blocked):
+            for x, y in candidates:
+                badge_cells = {(x + i, y) for i in range(len(text))}
+                if 0 <= y < canvas.height and not badge_cells & avoid:
+                    chosen = (x, y)
+                    break
+            if chosen is not None:
+                break
+        if chosen is None:
+            x, y = candidates[0]
+            chosen = (x, min(max(y, 0), canvas.height - 1))
+        x, y = chosen
+        canvas.text(x, y, text, style)
+        blocked.update((x + i, y) for i in range(len(text)))
 
     def _draw_labels(
         self, canvas: CellCanvas, cells: dict[str, Point],

@@ -3,8 +3,13 @@
 from flyin.domain.connection import Connection
 from flyin.domain.map import FlyInMap
 from flyin.domain.zone import Zone, ZoneType
+from flyin.simulation.drone_path import DronePath, DroneStep
+from flyin.simulation.simulation import Simulation
+from flyin.visualization.tui import palette
+from flyin.visualization.tui.canvas import CellCanvas
 from flyin.visualization.tui.model import VisualMap
 from flyin.visualization.tui.renderer import GraphRenderer, place_zones
+from flyin.visualization.tui.snapshot import TurnSnapshot, build_snapshots
 
 
 def _linear_map(name_a: str = "A", capacity: int = 1) -> FlyInMap:
@@ -93,3 +98,86 @@ def test_place_zones_keeps_ideal_cell_when_no_room() -> None:
     placed = place_zones({"a": (0, 0), "b": (0, 0)}, 1, 1)
 
     assert placed == {"a": (0, 0), "b": (0, 0)}
+
+
+def _turn(turn: int, *paths: list[tuple[str, bool]]) -> TurnSnapshot:
+    """Return the snapshot of ``turn`` for drones given as step lists."""
+    simulation = Simulation(paths=[
+        DronePath(
+            drone_id=index + 1,
+            steps=[
+                DroneStep(step_turn, location, on_connection)
+                for step_turn, (location, on_connection) in enumerate(steps)
+            ],
+        )
+        for index, steps in enumerate(paths)
+    ])
+    return build_snapshots(simulation, "goal")[turn]
+
+
+def _render_turn(
+    snapshot: TurnSnapshot, width: int = 26, height: int = 3,
+) -> CellCanvas:
+    visual = VisualMap.from_flyin_map(_linear_map(), "test")
+    return GraphRenderer(visual).render(width, height, snapshot)
+
+
+def test_waiting_drones_are_grouped_above_their_zone() -> None:
+    at_start = [("start", False)]
+    canvas = _render_turn(_turn(0, at_start, at_start, at_start))
+
+    # The 3-cell badge is centered on the start node in column 2.
+    assert canvas.plain_lines()[0].startswith(" D×3")
+    assert canvas.get(2, 0).style == palette.DRONE_WAITING_STYLE
+
+
+def test_single_drone_badge_shows_its_id_and_full_zone_is_emphasized() -> None:
+    path = [("start", False), ("A", False)]
+    canvas = _render_turn(_turn(1, path))
+    lines = canvas.plain_lines()
+    zone_x = lines[1].index("▲")
+
+    assert lines[0][zone_x:zone_x + 2] == "D1"
+    assert canvas.get(zone_x, 0).style == palette.DRONE_MOVING_STYLE
+    assert canvas.get(zone_x, 1).style == (
+        palette.TYPE_STYLES[ZoneType.RESTRICTED] + palette.FULL_ZONE_SUFFIX
+    )
+    start_x = lines[1].index("◉")
+    assert canvas.get(start_x + 1, 1).style == palette.ACTIVE_CONNECTION_STYLE
+    assert canvas.get(zone_x + 3, 1).style == palette.CONNECTION_STYLE
+
+
+def test_transit_badge_sits_on_the_connection() -> None:
+    path = [("start", False), ("start-A", True), ("A", False)]
+    canvas = _render_turn(_turn(1, path), width=40)
+    lines = canvas.plain_lines()
+
+    assert "D1" in lines[1]
+    assert lines[1].index("◉") < lines[1].index("D1") < lines[1].index("▲")
+    assert lines[0].strip() == "" and lines[2].strip() == ""
+
+
+def test_badge_moves_below_rather_than_covering_a_label() -> None:
+    flyin_map = FlyInMap(
+        drone_count=1,
+        start="start",
+        goal="goal",
+        zones={
+            "start": Zone("start", 1, 0, ZoneType.NORMAL, 1),
+            "abc": Zone("abc", 0, 1, ZoneType.NORMAL, 1),
+            "goal": Zone("goal", 10, 0, ZoneType.NORMAL, 1),
+        },
+        connections=[
+            Connection(1, "start", "goal", 1),
+            Connection(2, "abc", "start", 1),
+        ],
+    )
+    visual = VisualMap.from_flyin_map(flyin_map, "test")
+    snapshot = _turn(0, [("start", False)])
+
+    plain = GraphRenderer(visual).render(22, 4, snapshot).plain_lines()
+
+    # The row above start holds the "abc" label, so the badge goes below.
+    assert "abc" in plain[1]
+    assert "D1" not in plain[1]
+    assert plain[3].index("D1") == plain[2].index("◉")

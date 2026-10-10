@@ -25,7 +25,7 @@ make install        # uv sync
 make run ARGS=maps/subject-example.flyin
 make run ARGS="maps/subject-example.flyin --gui"       # open the PySide6 GUI
 make run ARGS="maps/subject-example.flyin --html-gui"  # open the HTML graphical view
-make run ARGS="maps/subject-example.flyin --visualize" # open the terminal (Textual) graph viewer
+make run ARGS="maps/subject-example.flyin --visualize" # terminal (Textual) viewer: ←/→ step turns, Home/End jump
 make test           # pytest
 make lint           # flake8 + mypy
 make lint-strict     # flake8 + mypy --strict

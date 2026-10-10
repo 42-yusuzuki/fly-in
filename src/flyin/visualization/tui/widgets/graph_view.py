@@ -6,6 +6,7 @@ from textual.widget import Widget
 from flyin.visualization.tui.canvas import CellCanvas
 from flyin.visualization.tui.model import VisualMap
 from flyin.visualization.tui.renderer import GraphRenderer
+from flyin.visualization.tui.snapshot import TurnSnapshot
 
 
 def canvas_to_text(canvas: CellCanvas) -> Text:
@@ -28,27 +29,42 @@ def canvas_to_text(canvas: CellCanvas) -> Text:
 
 
 class GraphView(Widget):
-    """Draw the static map topology, sized to the widget.
+    """Draw the map and the drones of the selected turn, sized to the widget.
 
-    The rendered text is cached per widget size, so the graph is only
-    re-rasterized when the terminal is resized.
+    The rendered text is cached per widget size and turn, so the graph
+    is only re-rasterized on resize or when the turn changes.
     """
 
-    def __init__(self, visual_map: VisualMap, widget_id: str | None = None) -> None:
+    def __init__(
+        self,
+        visual_map: VisualMap,
+        snapshot: TurnSnapshot | None = None,
+        widget_id: str | None = None,
+    ) -> None:
         """Create the view.
 
         Args:
             visual_map: Map to display.
+            snapshot: Turn whose drones are drawn, or ``None`` for the
+                bare topology.
             widget_id: Optional Textual widget id.
         """
         super().__init__(id=widget_id)
         self._renderer = GraphRenderer(visual_map)
-        self._cache: tuple[tuple[int, int], Text] | None = None
+        self._snapshot = snapshot
+        self._cache: tuple[tuple[int, int, int | None], Text] | None = None
+
+    def show(self, snapshot: TurnSnapshot) -> None:
+        """Switch to another turn and redraw."""
+        self._snapshot = snapshot
+        self.refresh()
 
     def render(self) -> Text:
-        """Return the graph rendered for the current content size."""
-        size = (self.content_size.width, self.content_size.height)
-        if self._cache is None or self._cache[0] != size:
-            canvas = self._renderer.render(*size)
-            self._cache = (size, canvas_to_text(canvas))
+        """Return the graph rendered for the current size and turn."""
+        width, height = self.content_size.width, self.content_size.height
+        turn = self._snapshot.turn if self._snapshot else None
+        key = (width, height, turn)
+        if self._cache is None or self._cache[0] != key:
+            canvas = self._renderer.render(width, height, self._snapshot)
+            self._cache = (key, canvas_to_text(canvas))
         return self._cache[1]

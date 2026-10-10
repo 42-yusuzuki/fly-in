@@ -16,6 +16,15 @@ CAPACITY_STYLE = "#94a3b8"
 LABEL_STYLE = "#cbd5e1"
 MUTED_STYLE = "#64748b"
 HEADING_STYLE = "bold #38bdf8"
+ACTIVE_CONNECTION_STYLE = "bold #fbbf24"
+FULL_ZONE_SUFFIX = " reverse"
+
+# Drone badges are dark text on a colored background so they stand out
+# from edges and labels; the background encodes what the drones did.
+DRONE_WAITING_STYLE = "bold #0b1120 on #94a3b8"
+DRONE_MOVING_STYLE = "bold #0b1120 on #fbbf24"
+DRONE_TRANSIT_STYLE = "bold #0b1120 on #e879f9"
+DRONE_ARRIVED_STYLE = "bold #0b1120 on #22c55e"
 
 ROLE_GLYPHS = {
     ZoneRole.START: "◉",
