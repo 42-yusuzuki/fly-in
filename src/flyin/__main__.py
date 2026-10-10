@@ -12,9 +12,10 @@ from flyin.solver.solver import FlyInSolver
 from flyin.visualization.graphical import GraphicalVisualizer
 from flyin.visualization.gui.app import run_gui
 from flyin.visualization.terminal import TerminalVisualizer
+from flyin.visualization.tui.app import run_visualizer
 
-_USAGE = "Usage: fly-in <map_file> [--gui | --html-gui]"
-_VALID_FLAGS = {"--gui", "--html-gui"}
+_USAGE = "Usage: fly-in <map_file> [--gui | --html-gui | --visualize]"
+_VALID_FLAGS = {"--gui", "--html-gui", "--visualize"}
 
 
 def main() -> None:
@@ -54,6 +55,8 @@ def main() -> None:
         visualizer.open_in_browser(output_path)
     elif flag == "--gui":
         run_gui(flyin_map, simulation)
+    elif flag == "--visualize":
+        run_visualizer(flyin_map, map_path.name)
 
 
 if __name__ == "__main__":
