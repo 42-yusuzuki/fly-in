@@ -1,6 +1,8 @@
 """Main graph area of the terminal visualizer."""
 
 from rich.text import Text
+from textual.events import Click
+from textual.message import Message
 from textual.widget import Widget
 
 from flyin.visualization.tui.canvas import CellCanvas
@@ -33,8 +35,17 @@ class GraphView(Widget):
     """Draw the map and the drones of the selected frame, sized to the widget.
 
     The rendered text is cached per widget size and frame, so the graph
-    is only re-rasterized on resize or when the frame changes.
+    is only re-rasterized on resize or when the frame changes. Clicking
+    posts :class:`GraphView.Picked` with whatever is under the mouse.
     """
+
+    class Picked(Message):
+        """Posted on click with the zone or connection hit, or ``None``."""
+
+        def __init__(self, selected: Selectable | None) -> None:
+            """Create the message for what was clicked."""
+            super().__init__()
+            self.selected = selected
 
     def __init__(
         self,
@@ -94,3 +105,13 @@ class GraphView(Widget):
             )
             self._cache = (key, canvas_to_text(canvas))
         return self._cache[1]
+
+    def on_click(self, event: Click) -> None:
+        """Report the zone or connection under the mouse."""
+        offset = event.get_content_offset(self)
+        if offset is None:
+            return
+        self.post_message(self.Picked(self._renderer.hit_test(
+            self.content_size.width, self.content_size.height,
+            offset.x, offset.y,
+        )))

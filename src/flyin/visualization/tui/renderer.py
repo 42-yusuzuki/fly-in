@@ -8,6 +8,7 @@ partial marks.
 """
 
 import math
+from dataclasses import dataclass
 
 from flyin.visualization.tui import palette
 from flyin.visualization.tui.animation import (
@@ -93,6 +94,27 @@ def _nearest_free(
     return cell
 
 
+@dataclass(frozen=True)
+class LabelSpan:
+    """Where a zone's (possibly truncated) name label is drawn."""
+
+    x: int
+    y: int
+    text: str
+
+    def covers(self, x: int, y: int) -> bool:
+        """Return whether the cell ``(x, y)`` is part of the label."""
+        return y == self.y and self.x <= x < self.x + len(self.text)
+
+
+@dataclass(frozen=True)
+class _Geometry:
+    """Size-dependent placement of nodes and labels, cached per size."""
+
+    cells: dict[str, Point]
+    labels: dict[str, LabelSpan]
+
+
 def badge_text(drones: tuple[DroneSnapshot, ...]) -> str:
     """Return the label for a group of drones drawn at one spot.
 
@@ -126,26 +148,88 @@ class GraphRenderer:
             visual_map: Map to draw. It is only read.
         """
         self._map = visual_map
-        self._layout_cache: tuple[tuple[int, int], dict[str, Point]] | None = None
+        self._geometry_cache: tuple[tuple[int, int], _Geometry] | None = None
 
     def layout(self, width: int, height: int) -> dict[str, Point]:
-        """Return the screen cell of every zone for a viewport size.
+        """Return the screen cell of every zone for a viewport size."""
+        return self._geometry(width, height).cells
 
-        The result is cached until the size changes, since it is needed
-        on every animation frame.
+    def labels(self, width: int, height: int) -> dict[str, LabelSpan]:
+        """Return where each visible zone label goes for a viewport size."""
+        return self._geometry(width, height).labels
+
+    def hit_test(
+        self, width: int, height: int, x: int, y: int,
+    ) -> Selectable | None:
+        """Return the zone or connection under the cell ``(x, y)``.
+
+        A node or its label wins over a connection line; failing those,
+        a node within one cell is accepted so clicks need not be exact.
         """
-        if self._layout_cache is not None and self._layout_cache[0] == (
+        geometry = self._geometry(width, height)
+        for zone in self._map.zones:
+            if geometry.cells[zone.name] == (x, y):
+                return zone
+        for zone in self._map.zones:
+            label = geometry.labels.get(zone.name)
+            if label is not None and label.covers(x, y):
+                return zone
+        # Later connections are drawn on top, so they win at crossings.
+        for connection in reversed(self._map.connections):
+            line = raster_line(
+                *geometry.cells[connection.zone_a],
+                *geometry.cells[connection.zone_b],
+            )
+            if (x, y) in line:
+                return connection
+        near = [
+            zone for zone in self._map.zones
+            if max(
+                abs(geometry.cells[zone.name][0] - x),
+                abs(geometry.cells[zone.name][1] - y),
+            ) <= 1
+        ]
+        return near[0] if near else None
+
+    def _geometry(self, width: int, height: int) -> _Geometry:
+        """Place nodes and labels, cached until the size changes.
+
+        Both are needed on every animation frame and by hit tests.
+        """
+        if self._geometry_cache is not None and self._geometry_cache[0] == (
             width, height,
         ):
-            return self._layout_cache[1]
+            return self._geometry_cache[1]
         viewport = Viewport(self._map.bounds, width, height)
         ideal = {
             zone.name: viewport.to_cell(zone.world_x, zone.world_y)
             for zone in self._map.zones
         }
         cells = place_zones(ideal, width, height)
-        self._layout_cache = ((width, height), cells)
-        return cells
+        geometry = _Geometry(cells, self._place_labels(cells, width))
+        self._geometry_cache = ((width, height), geometry)
+        return geometry
+
+    def _place_labels(
+        self, cells: dict[str, Point], width: int,
+    ) -> dict[str, LabelSpan]:
+        """Place labels beside nodes, truncating rather than overlapping.
+
+        A label never covers a node or a previously placed label. It goes
+        to the right of its node when it fits, otherwise to whichever
+        side has more room, truncated with an ellipsis; labels with too
+        little room are hidden.
+        """
+        blocked: set[Point] = set(cells.values())
+        labels: dict[str, LabelSpan] = {}
+        for zone in self._map.zones:
+            x, y = cells[zone.name]
+            text, start_x = self._fit_label(zone, x, y, width, blocked)
+            if not text:
+                continue
+            labels[zone.name] = LabelSpan(start_x, y, text)
+            blocked.update((start_x + i, y) for i in range(len(text)))
+        return labels
 
     def render(
         self,
@@ -178,7 +262,9 @@ class GraphRenderer:
         used = snapshot.used_links() if snapshot else frozenset()
         self._draw_connections(canvas, cells, usage, used, selected)
         self._draw_zones(canvas, cells, snapshot, selected)
-        occupied = self._draw_labels(canvas, cells, selected)
+        occupied = self._draw_labels(
+            canvas, cells, self.labels(width, height), selected,
+        )
         self._draw_connection_capacities(canvas, cells, occupied)
         if snapshot is not None:
             if previous is None or progress >= 1.0:
@@ -397,30 +483,25 @@ class GraphRenderer:
         self,
         canvas: CellCanvas,
         cells: dict[str, Point],
-        selected: Selectable | None = None,
+        labels: dict[str, LabelSpan],
+        selected: Selectable | None,
     ) -> set[Point]:
-        """Place labels beside nodes, truncating rather than overlapping.
-
-        A label never covers a node or a previously placed label. It goes
-        to the right of its node when it fits, otherwise to whichever
-        side has more room, truncated with an ellipsis; labels with too
-        little room are hidden.
+        """Draw the placed labels.
 
         Returns:
             Every cell now used by a node or a label.
         """
         blocked: set[Point] = set(cells.values())
         for zone in self._map.zones:
-            x, y = cells[zone.name]
-            text, start_x = self._fit_label(zone, x, y, canvas.width, blocked)
-            if not text:
+            label = labels.get(zone.name)
+            if label is None:
                 continue
             style = (
                 palette.SELECTED_ZONE_STYLE if zone == selected
                 else palette.label_style(zone)
             )
-            canvas.text(start_x, y, text, style)
-            blocked.update((start_x + i, y) for i in range(len(text)))
+            canvas.text(label.x, label.y, label.text, style)
+            blocked.update((label.x + i, label.y) for i in range(len(label.text)))
         return blocked
 
     def _fit_label(

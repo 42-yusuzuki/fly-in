@@ -21,8 +21,10 @@ from flyin.visualization.tui.inspection import Selectable, selectables
 from flyin.visualization.tui.model import VisualMap
 from flyin.visualization.tui.snapshot import TurnSnapshot, build_snapshots
 from flyin.visualization.tui.widgets.graph_view import GraphView
+from flyin.visualization.tui.widgets.help import HelpScreen
 from flyin.visualization.tui.widgets.inspector import Inspector
 from flyin.visualization.tui.widgets.status_panel import StatusPanel
+from flyin.visualization.tui.widgets.timeline import Timeline
 
 MIN_COLUMNS = 100
 MIN_ROWS = 30
@@ -56,6 +58,10 @@ class FlyInVisualizerApp(App[None]):
     #side {
         width: 34;
     }
+    #inspector, #status {
+        text-wrap: nowrap;
+        text-overflow: ellipsis;
+    }
     #inspector {
         height: auto;
         max-height: 60%;
@@ -67,13 +73,17 @@ class FlyInVisualizerApp(App[None]):
         padding: 0 1;
         border: round #334155;
     }
+    #timeline {
+        height: 2;
+        padding: 0 1;
+    }
     #too-small {
         display: none;
         height: 1fr;
         content-align: center middle;
         color: #f43f5e;
     }
-    .cramped #main {
+    .cramped #main, .cramped #timeline {
         display: none;
     }
     .cramped #too-small {
@@ -86,18 +96,21 @@ class FlyInVisualizerApp(App[None]):
         Binding("right", "next_turn", "Next turn"),
         Binding("home", "first_turn", "First", show=False),
         Binding("end", "last_turn", "Last", show=False),
-        Binding("plus", "faster", "Faster"),
+        Binding("plus", "faster", "Faster", show=False),
         Binding("equals_sign", "faster", "Faster", show=False),
-        Binding("minus", "slower", "Slower"),
-        Binding("r", "restart", "Restart"),
+        Binding("minus", "slower", "Slower", show=False),
+        Binding("r", "restart", "Restart", show=False),
         # Priority bindings override the screen's Tab focus navigation;
         # nothing in this app takes keyboard focus.
         Binding("tab", "select_next", "Select", priority=True),
         Binding("shift+tab", "select_previous", "Select back", show=False,
                 priority=True),
-        Binding("escape", "clear_selection", "Clear", priority=True),
+        Binding("escape", "clear_selection", "Clear", show=False),
+        Binding("question_mark", "show_help", "Help"),
         Binding("q", "quit", "Quit"),
     ]
+    #: Actions still allowed while the help overlay is open.
+    _HELP_ACTIONS = frozenset({"quit"})
 
     def __init__(
         self,
@@ -164,6 +177,7 @@ class FlyInVisualizerApp(App[None]):
                     self._visual_map, snapshot, self.last_turn,
                     widget_id="status",
                 )
+        yield Timeline(self.last_turn, widget_id="timeline")
         yield Static("", id="too-small")
         yield Footer()
 
@@ -238,6 +252,31 @@ class FlyInVisualizerApp(App[None]):
             )
         self._refresh_view()
 
+    def action_show_help(self) -> None:
+        """Open the help overlay."""
+        self.push_screen(HelpScreen())
+
+    def check_action(
+        self, action: str, parameters: tuple[object, ...],
+    ) -> bool | None:
+        """Disable the viewer's own keys while the help overlay is open."""
+        if isinstance(self.screen, HelpScreen):
+            return action in self._HELP_ACTIONS
+        return True
+
+    def on_graph_view_picked(self, message: GraphView.Picked) -> None:
+        """Inspect whatever was clicked; clicking empty space clears."""
+        selected = message.selected
+        self._selection_index = (
+            None if selected is None else self._selectables.index(selected)
+        )
+        self._refresh_view()
+
+    def on_timeline_seek(self, message: Timeline.Seek) -> None:
+        """Jump to the clicked turn, at rest."""
+        self._playback.go_to(message.turn)
+        self._refresh_view()
+
     def advance(self, elapsed: float) -> None:
         """Advance playback by ``elapsed`` seconds and redraw.
 
@@ -272,6 +311,7 @@ class FlyInVisualizerApp(App[None]):
         self.query_one(GraphView).show(
             snapshot, previous, playback.progress, self.selected,
         )
+        self.query_one(Timeline).show(playback.turn - 1 + playback.progress)
         if graph_only:
             return
         self.query_one(Inspector).show(snapshot, self.selected)

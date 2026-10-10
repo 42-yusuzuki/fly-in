@@ -237,3 +237,17 @@ def test_moving_drone_is_drawn_between_zones_mid_turn() -> None:
     assert start < middle < end
     lines = renderer.render(40, 4, after, before, 1.0).plain_lines()
     assert lines == renderer.render(40, 4, after).plain_lines()
+
+
+def test_hit_test_finds_nodes_labels_and_connections() -> None:
+    visual = VisualMap.from_flyin_map(_linear_map(), "test")
+    renderer = GraphRenderer(visual)
+    # "  ◉─start────▲─A──goal─◎  "
+    line = renderer.render(26, 3).plain_lines()[1]
+
+    assert renderer.hit_test(26, 3, line.index("◉"), 1) == visual.zone("start")
+    assert renderer.hit_test(26, 3, line.index("goal"), 1) == visual.zone("goal")
+    assert renderer.hit_test(26, 3, line.index("────"), 1) == visual.connections[0]
+    # One row above a node still selects it; far away selects nothing.
+    assert renderer.hit_test(26, 3, line.index("▲"), 0) == visual.zone("A")
+    assert renderer.hit_test(26, 3, 0, 0) is None

@@ -14,12 +14,14 @@ from flyin.visualization.tui.app import FlyInVisualizerApp
 from flyin.visualization.tui.model import VisualMap
 from flyin.visualization.tui.snapshot import TurnSnapshot, build_snapshots
 from flyin.visualization.tui.widgets.graph_view import GraphView, canvas_to_text
+from flyin.visualization.tui.renderer import GraphRenderer
+from flyin.visualization.tui.widgets.help import HelpScreen, build_help_text
 from flyin.visualization.tui.widgets.inspector import Inspector
+from flyin.visualization.tui.widgets.timeline import Timeline
 from flyin.visualization.tui.widgets.status_panel import (
     MAX_LISTED_MOVES,
     StatusPanel,
     build_status_text,
-    progress_bar,
 )
 from flyin.visualization.tui.canvas import CellCanvas
 
@@ -152,6 +154,72 @@ def test_tab_cycles_selection_and_escape_clears_it() -> None:
     asyncio.run(scenario())
 
 
+def test_clicking_graph_selects_and_empty_space_clears() -> None:
+    async def scenario() -> None:
+        app = _app()
+        visual = _visual_map()
+        async with app.run_test(size=(120, 40)) as pilot:
+            graph = app.query_one(GraphView)
+            size = graph.content_size
+            renderer = GraphRenderer(visual)
+            x, y = renderer.layout(size.width, size.height)["roof1"]
+            # The graph has a 1-cell border around its content.
+            await pilot.click(GraphView, offset=(x + 1, y + 1))
+            assert app.selected == visual.zone("roof1")
+
+            await pilot.click(GraphView, offset=(size.width, 1))
+            assert app.selected is None
+
+    asyncio.run(scenario())
+
+
+def test_clicking_timeline_seeks() -> None:
+    async def scenario() -> None:
+        app = _app()
+        async with app.run_test(size=(120, 40)) as pilot:
+            timeline = app.query_one(Timeline)
+            width = timeline.content_size.width
+            # The timeline has 1 column of padding on the left.
+            await pilot.click(Timeline, offset=(width, 0))
+            assert app.turn == app.last_turn
+            await pilot.click(Timeline, offset=(1, 0))
+            assert app.turn == 0
+
+    asyncio.run(scenario())
+
+
+def test_help_overlay_blocks_viewer_keys_until_closed() -> None:
+    async def scenario() -> None:
+        app = _app()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.press("question_mark")
+            assert isinstance(app.screen, HelpScreen)
+            help_text = app.screen.query_one("#help-text", Static)
+            assert help_text.size.width >= 40 and help_text.size.height >= 10
+
+            await pilot.press("right", "tab", "space")
+            assert app.turn == 0
+            assert app.selected is None
+            assert not app.playback.playing
+
+            await pilot.press("escape")
+            assert not isinstance(app.screen, HelpScreen)
+            await pilot.press("question_mark", "question_mark")
+            assert not isinstance(app.screen, HelpScreen)
+
+            await pilot.press("right")
+            assert app.turn == 1
+
+    asyncio.run(scenario())
+
+
+def test_help_text_lists_every_bound_key() -> None:
+    text = build_help_text().plain
+
+    for keys in ("Space", "Tab / Shift+Tab", "Click timeline", "Esc", "?"):
+        assert keys in text
+
+
 def test_status_text_lists_turn_counts_and_map_metadata() -> None:
     visual = _visual_map()
     snapshots = _snapshots()
@@ -180,13 +248,6 @@ def test_status_text_lists_moves_and_truncates() -> None:
     text = build_status_text(visual, crowded, len(snapshots) - 1).plain
     hidden = len(crowded.movers()) - MAX_LISTED_MOVES
     assert f"+{hidden} more" in text
-
-
-def test_progress_bar() -> None:
-    assert progress_bar(0, 4, width=4) == "[----]"
-    assert progress_bar(2, 4, width=4) == "[==--]"
-    assert progress_bar(4, 4, width=4) == "[====]"
-    assert progress_bar(0, 0, width=4) == "[====]"
 
 
 def test_app_rejects_empty_snapshots() -> None:

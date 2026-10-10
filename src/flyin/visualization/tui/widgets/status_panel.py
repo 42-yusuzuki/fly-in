@@ -9,7 +9,6 @@ from flyin.visualization.tui.model import VisualMap, ZoneRole
 from flyin.visualization.tui.snapshot import DroneActivity, TurnSnapshot
 
 _KEY_WIDTH = 13
-_BAR_WIDTH = 20
 #: Moves listed before the rest are summarized as "+N more".
 MAX_LISTED_MOVES = 8
 
@@ -19,12 +18,6 @@ _ACTIVITY_STYLES = {
     DroneActivity.IN_TRANSIT: palette.DRONE_TRANSIT_STYLE,
     DroneActivity.ARRIVED: palette.DRONE_ARRIVED_STYLE,
 }
-
-
-def progress_bar(turn: int, total_turns: int, width: int = _BAR_WIDTH) -> str:
-    """Return a ``[====----]`` bar showing ``turn`` out of ``total_turns``."""
-    filled = width if total_turns <= 0 else width * turn // total_turns
-    return "[" + "=" * filled + "-" * (width - filled) + "]"
 
 
 def build_status_text(
@@ -46,8 +39,6 @@ def build_status_text(
     add_row(text, "Turn", f"{snapshot.turn} / {total_turns}")
     if playback is not None:
         add_row(text, "Playback", playback)
-    text.append(f"{progress_bar(snapshot.turn, total_turns)}\n",
-                palette.CAPACITY_STYLE)
     _count(text, DroneActivity.WAITING, "Waiting",
            snapshot.count(DroneActivity.WAITING))
     _count(text, DroneActivity.MOVING, "Moving",
