@@ -159,7 +159,7 @@ def drone_motion(
     source, target = current.link
     if current.activity is DroneActivity.IN_TRANSIT:
         return DroneMotion(current, Anchor(source), Anchor.midpoint(source, target))
-    if previous.activity is DroneActivity.IN_TRANSIT:
+    if current.landing:
         return DroneMotion(current, Anchor.midpoint(source, target), Anchor(target))
     return DroneMotion(current, Anchor(source), Anchor(target))
 

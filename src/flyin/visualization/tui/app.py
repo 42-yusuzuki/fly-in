@@ -9,7 +9,7 @@ import time
 
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Horizontal
+from textual.containers import Horizontal, Vertical
 from textual.events import Resize
 from textual.timer import Timer
 from textual.widgets import Footer, Static
@@ -17,9 +17,11 @@ from textual.widgets import Footer, Static
 from flyin.domain.map import FlyInMap
 from flyin.simulation.simulation import Simulation
 from flyin.visualization.tui.animation import PlaybackController
+from flyin.visualization.tui.inspection import Selectable, selectables
 from flyin.visualization.tui.model import VisualMap
 from flyin.visualization.tui.snapshot import TurnSnapshot, build_snapshots
 from flyin.visualization.tui.widgets.graph_view import GraphView
+from flyin.visualization.tui.widgets.inspector import Inspector
 from flyin.visualization.tui.widgets.status_panel import StatusPanel
 
 MIN_COLUMNS = 100
@@ -51,8 +53,17 @@ class FlyInVisualizerApp(App[None]):
         width: 1fr;
         border: round #334155;
     }
-    #status {
+    #side {
         width: 34;
+    }
+    #inspector {
+        height: auto;
+        max-height: 60%;
+        padding: 0 1;
+        border: round #f8fafc;
+    }
+    #status {
+        height: 1fr;
         padding: 0 1;
         border: round #334155;
     }
@@ -79,6 +90,12 @@ class FlyInVisualizerApp(App[None]):
         Binding("equals_sign", "faster", "Faster", show=False),
         Binding("minus", "slower", "Slower"),
         Binding("r", "restart", "Restart"),
+        # Priority bindings override the screen's Tab focus navigation;
+        # nothing in this app takes keyboard focus.
+        Binding("tab", "select_next", "Select", priority=True),
+        Binding("shift+tab", "select_previous", "Select back", show=False,
+                priority=True),
+        Binding("escape", "clear_selection", "Clear", priority=True),
         Binding("q", "quit", "Quit"),
     ]
 
@@ -108,6 +125,8 @@ class FlyInVisualizerApp(App[None]):
         self._visual_map = visual_map
         self._snapshots = snapshots
         self._playback = PlaybackController(len(snapshots) - 1)
+        self._selectables = selectables(visual_map)
+        self._selection_index: int | None = None
         self._frame_timer: Timer | None = None
         self._last_frame = 0.0
 
@@ -115,6 +134,13 @@ class FlyInVisualizerApp(App[None]):
     def playback(self) -> PlaybackController:
         """Return the playback state (turn, progress, speed, playing)."""
         return self._playback
+
+    @property
+    def selected(self) -> Selectable | None:
+        """Return the zone or connection being inspected, if any."""
+        if self._selection_index is None:
+            return None
+        return self._selectables[self._selection_index]
 
     @property
     def turn(self) -> int:
@@ -132,9 +158,12 @@ class FlyInVisualizerApp(App[None]):
         yield Static(self._title_text(), id="title-bar")
         with Horizontal(id="main"):
             yield GraphView(self._visual_map, snapshot, widget_id="graph")
-            yield StatusPanel(
-                self._visual_map, snapshot, self.last_turn, widget_id="status",
-            )
+            with Vertical(id="side"):
+                yield Inspector(self._visual_map, widget_id="inspector")
+                yield StatusPanel(
+                    self._visual_map, snapshot, self.last_turn,
+                    widget_id="status",
+                )
         yield Static("", id="too-small")
         yield Footer()
 
@@ -184,6 +213,31 @@ class FlyInVisualizerApp(App[None]):
         self._timer().pause()
         self._refresh_view()
 
+    def action_select_next(self) -> None:
+        """Inspect the next zone or connection (zones first)."""
+        self._cycle_selection(1)
+
+    def action_select_previous(self) -> None:
+        """Inspect the previous zone or connection."""
+        self._cycle_selection(-1)
+
+    def action_clear_selection(self) -> None:
+        """Stop inspecting and hide the inspector."""
+        self._selection_index = None
+        self._refresh_view()
+
+    def _cycle_selection(self, delta: int) -> None:
+        if not self._selectables:
+            return
+        if self._selection_index is None:
+            start = 0 if delta > 0 else len(self._selectables) - 1
+            self._selection_index = start
+        else:
+            self._selection_index = (
+                (self._selection_index + delta) % len(self._selectables)
+            )
+        self._refresh_view()
+
     def advance(self, elapsed: float) -> None:
         """Advance playback by ``elapsed`` seconds and redraw.
 
@@ -215,9 +269,12 @@ class FlyInVisualizerApp(App[None]):
         playback = self._playback
         snapshot = self._snapshots[playback.turn]
         previous = self._snapshots[playback.turn - 1] if playback.turn else None
-        self.query_one(GraphView).show(snapshot, previous, playback.progress)
+        self.query_one(GraphView).show(
+            snapshot, previous, playback.progress, self.selected,
+        )
         if graph_only:
             return
+        self.query_one(Inspector).show(snapshot, self.selected)
         self.query_one(StatusPanel).show(snapshot, playback.label)
         self.query_one("#title-bar", Static).update(self._title_text())
 

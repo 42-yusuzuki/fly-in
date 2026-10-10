@@ -4,6 +4,7 @@ from rich.text import Text
 from textual.widget import Widget
 
 from flyin.visualization.tui.canvas import CellCanvas
+from flyin.visualization.tui.inspection import Selectable
 from flyin.visualization.tui.model import VisualMap
 from flyin.visualization.tui.renderer import GraphRenderer
 from flyin.visualization.tui.snapshot import TurnSnapshot
@@ -54,13 +55,17 @@ class GraphView(Widget):
         self._snapshot = snapshot
         self._previous: TurnSnapshot | None = None
         self._progress = 1.0
-        self._cache: tuple[tuple[int, int, int | None, float], Text] | None = None
+        self._selected: Selectable | None = None
+        self._cache: tuple[
+            tuple[int, int, int | None, float, Selectable | None], Text,
+        ] | None = None
 
     def show(
         self,
         snapshot: TurnSnapshot,
         previous: TurnSnapshot | None = None,
         progress: float = 1.0,
+        selected: Selectable | None = None,
     ) -> None:
         """Switch to another frame and redraw.
 
@@ -69,20 +74,23 @@ class GraphView(Widget):
             previous: Turn before it, needed while animating.
             progress: Interpolation from ``previous`` (0.0) to
                 ``snapshot`` (1.0).
+            selected: Zone or connection to highlight, if any.
         """
         self._snapshot = snapshot
         self._previous = previous
         self._progress = progress
+        self._selected = selected
         self.refresh()
 
     def render(self) -> Text:
         """Return the graph rendered for the current size and frame."""
         width, height = self.content_size.width, self.content_size.height
         turn = self._snapshot.turn if self._snapshot else None
-        key = (width, height, turn, self._progress)
+        key = (width, height, turn, self._progress, self._selected)
         if self._cache is None or self._cache[0] != key:
             canvas = self._renderer.render(
                 width, height, self._snapshot, self._previous, self._progress,
+                self._selected,
             )
             self._cache = (key, canvas_to_text(canvas))
         return self._cache[1]

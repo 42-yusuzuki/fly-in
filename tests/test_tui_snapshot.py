@@ -7,6 +7,7 @@ from flyin.simulation.simulation import Simulation
 from flyin.visualization.tui.snapshot import (
     DroneActivity,
     DroneSnapshot,
+    TurnSnapshot,
     build_snapshots,
 )
 
@@ -20,6 +21,21 @@ def _path(drone_id: int, *locations: str, transit: int | None = None) -> DronePa
             for turn, location in enumerate(locations)
         ],
     )
+
+
+def _snapshots(*paths: list[str]) -> tuple[TurnSnapshot, ...]:
+    """Build snapshots; locations containing ``-`` are connections."""
+    simulation = Simulation(paths=[
+        DronePath(
+            drone_id=index + 1,
+            steps=[
+                DroneStep(turn, location, on_connection="-" in location)
+                for turn, location in enumerate(locations)
+            ],
+        )
+        for index, locations in enumerate(paths)
+    ])
+    return build_snapshots(simulation, "g")
 
 
 def _simulation() -> Simulation:
@@ -52,7 +68,9 @@ def test_drone_activities_follow_the_paths() -> None:
         2, DroneActivity.IN_TRANSIT, None, "s", "R",
     )
     # Landing reports the zone the transit started from.
-    assert drone(2, 2) == DroneSnapshot(2, DroneActivity.MOVING, "R", "s", "R")
+    assert drone(2, 2) == DroneSnapshot(
+        2, DroneActivity.MOVING, "R", "s", "R", landing=True,
+    )
 
 
 def test_drones_delivered_earlier_leave_the_map() -> None:
@@ -95,3 +113,16 @@ def test_path_ending_on_a_connection_is_rejected() -> None:
 
     with pytest.raises(ValueError):
         build_snapshots(simulation, "g")
+
+
+def test_link_usage_counts_transit_once() -> None:
+    snapshots = _snapshots(["s", "s-R", "R"], ["s", "s", "s-R", "R"])
+
+    turn_2 = snapshots[2]
+
+    # Drone 1 lands (counted on turn 1); drone 2 takes off.
+    assert {k: [d.drone_id for d in v] for k, v in turn_2.link_usage().items()} == {
+        ("R", "s"): [2],
+    }
+    assert [d.drone_id for d in turn_2.landings()[("R", "s")]] == [1]
+    assert turn_2.used_links() == {frozenset({"s", "R"})}

@@ -17,12 +17,14 @@ from flyin.visualization.tui.animation import (
     turn_motions,
 )
 from flyin.visualization.tui.canvas import CellCanvas, raster_line
-from flyin.visualization.tui.model import VisualMap, VisualZone
+from flyin.visualization.tui.inspection import Selectable
+from flyin.visualization.tui.model import VisualConnection, VisualMap, VisualZone
 from flyin.visualization.tui.snapshot import (
     DroneActivity,
     DroneSnapshot,
     TurnSnapshot,
     group_by_link,
+    link_key,
 )
 from flyin.visualization.tui.viewport import Viewport
 
@@ -152,6 +154,7 @@ class GraphRenderer:
         snapshot: TurnSnapshot | None = None,
         previous: TurnSnapshot | None = None,
         progress: float = 1.0,
+        selected: Selectable | None = None,
     ) -> CellCanvas:
         """Draw the graph, plus the drones of ``snapshot`` if given.
 
@@ -164,16 +167,18 @@ class GraphRenderer:
                 moves into it; ``None`` draws ``snapshot`` at rest.
             progress: How far the moves into ``snapshot`` have gone,
                 from 0.0 (looks like ``previous``) to 1.0 (at rest).
+            selected: Zone or connection to highlight, if any.
         """
         canvas = CellCanvas(width, height)
         if width == 0 or height == 0:
             return canvas
 
         cells = self.layout(width, height)
+        usage = snapshot.link_usage() if snapshot else {}
         used = snapshot.used_links() if snapshot else frozenset()
-        self._draw_connections(canvas, cells, used)
-        self._draw_zones(canvas, cells, snapshot)
-        occupied = self._draw_labels(canvas, cells)
+        self._draw_connections(canvas, cells, usage, used, selected)
+        self._draw_zones(canvas, cells, snapshot, selected)
+        occupied = self._draw_labels(canvas, cells, selected)
         self._draw_connection_capacities(canvas, cells, occupied)
         if snapshot is not None:
             if previous is None or progress >= 1.0:
@@ -190,17 +195,42 @@ class GraphRenderer:
         self,
         canvas: CellCanvas,
         cells: dict[str, Point],
+        usage: dict[tuple[str, str], tuple[DroneSnapshot, ...]],
         used: frozenset[frozenset[str]],
+        selected: Selectable | None,
     ) -> None:
-        for connection in self._map.connections:
+        """Draw every connection, styled by how busy it is this turn.
+
+        The selected connection is drawn last so it stays visible where
+        lines cross.
+        """
+        ordered = sorted(
+            self._map.connections, key=lambda conn: conn == selected,
+        )
+        for connection in ordered:
             x1, y1 = cells[connection.zone_a]
             x2, y2 = cells[connection.zone_b]
-            pair = frozenset((connection.zone_a, connection.zone_b))
-            style = (
-                palette.ACTIVE_CONNECTION_STYLE if pair in used
-                else palette.CONNECTION_STYLE
+            canvas.line(
+                x1, y1, x2, y2,
+                self._connection_style(connection, usage, used, selected),
             )
-            canvas.line(x1, y1, x2, y2, style)
+
+    @staticmethod
+    def _connection_style(
+        connection: VisualConnection,
+        usage: dict[tuple[str, str], tuple[DroneSnapshot, ...]],
+        used: frozenset[frozenset[str]],
+        selected: Selectable | None,
+    ) -> str:
+        """Pick selected, full, active (any drone moving on it), or idle."""
+        if connection == selected:
+            return palette.SELECTED_CONNECTION_STYLE
+        key = link_key(connection.zone_a, connection.zone_b)
+        if len(usage.get(key, ())) >= connection.max_capacity:
+            return palette.FULL_CONNECTION_STYLE
+        if frozenset(key) in used:
+            return palette.ACTIVE_CONNECTION_STYLE
+        return palette.CONNECTION_STYLE
 
     def _draw_connection_capacities(
         self,
@@ -234,11 +264,14 @@ class GraphRenderer:
         canvas: CellCanvas,
         cells: dict[str, Point],
         snapshot: TurnSnapshot | None,
+        selected: Selectable | None,
     ) -> None:
         for zone in self._map.zones:
             x, y = cells[zone.name]
             style = palette.zone_style(zone)
-            if (
+            if zone == selected:
+                style = palette.SELECTED_ZONE_STYLE
+            elif (
                 snapshot is not None
                 and zone.max_drones is not None
                 and len(snapshot.drones_at(zone.name)) >= zone.max_drones
@@ -361,7 +394,10 @@ class GraphRenderer:
         blocked.update((x + i, y) for i in range(len(text)))
 
     def _draw_labels(
-        self, canvas: CellCanvas, cells: dict[str, Point],
+        self,
+        canvas: CellCanvas,
+        cells: dict[str, Point],
+        selected: Selectable | None = None,
     ) -> set[Point]:
         """Place labels beside nodes, truncating rather than overlapping.
 
@@ -379,7 +415,11 @@ class GraphRenderer:
             text, start_x = self._fit_label(zone, x, y, canvas.width, blocked)
             if not text:
                 continue
-            canvas.text(start_x, y, text, palette.label_style(zone))
+            style = (
+                palette.SELECTED_ZONE_STYLE if zone == selected
+                else palette.label_style(zone)
+            )
+            canvas.text(start_x, y, text, style)
             blocked.update((start_x + i, y) for i in range(len(text)))
         return blocked
 

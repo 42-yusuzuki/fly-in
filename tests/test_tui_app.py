@@ -14,6 +14,7 @@ from flyin.visualization.tui.app import FlyInVisualizerApp
 from flyin.visualization.tui.model import VisualMap
 from flyin.visualization.tui.snapshot import TurnSnapshot, build_snapshots
 from flyin.visualization.tui.widgets.graph_view import GraphView, canvas_to_text
+from flyin.visualization.tui.widgets.inspector import Inspector
 from flyin.visualization.tui.widgets.status_panel import (
     MAX_LISTED_MOVES,
     StatusPanel,
@@ -121,6 +122,32 @@ def test_space_plays_until_the_end_and_restart_pauses() -> None:
 
             await pilot.press("r")
             assert (app.turn, app.playback.playing) == (0, False)
+
+    asyncio.run(scenario())
+
+
+def test_tab_cycles_selection_and_escape_clears_it() -> None:
+    async def scenario() -> None:
+        app = _app()
+        visual = _visual_map()
+        async with app.run_test(size=(120, 40)) as pilot:
+            inspector = app.query_one(Inspector)
+            assert app.selected is None and not inspector.display
+
+            await pilot.press("tab")
+            assert app.selected == visual.zones[0]
+            assert inspector.display
+            assert f"Zone         {visual.zones[0].name}" in str(inspector.render())
+
+            await pilot.press("shift+tab")
+            assert app.selected == visual.connections[-1]
+            assert "Connection" in str(inspector.render())
+
+            await pilot.press("right")
+            assert "(turn 1)" in str(inspector.render())
+
+            await pilot.press("escape")
+            assert app.selected is None and not inspector.display
 
     asyncio.run(scenario())
 

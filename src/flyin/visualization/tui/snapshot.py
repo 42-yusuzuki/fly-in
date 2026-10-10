@@ -41,6 +41,8 @@ class DroneSnapshot:
             two turns ago), or ``None`` if it did not move.
         target: Zone the drone is heading to or just reached, or
             ``None`` if it did not move.
+        landing: Whether this turn's move finishes a restricted transit
+            (the drone was on the connection at the previous turn).
     """
 
     drone_id: int
@@ -48,6 +50,7 @@ class DroneSnapshot:
     zone: str | None
     source: str | None = None
     target: str | None = None
+    landing: bool = False
 
     @property
     def link(self) -> tuple[str, str] | None:
@@ -112,6 +115,30 @@ class TurnSnapshot:
             for drone in self.drones if drone.link is not None
         )
 
+    def link_usage(self) -> dict[tuple[str, str], tuple[DroneSnapshot, ...]]:
+        """Return the drones counted against each connection's capacity.
+
+        This matches the solver's model: a connection carries the drones
+        crossing it directly this turn plus the drones sitting on it in
+        transit. A drone landing from a transit was counted on the
+        previous turn, so it is not counted again. Keys come from
+        :func:`link_key`.
+        """
+        return group_by_link(
+            tuple(drone for drone in self.movers() if not drone.landing),
+        )
+
+    def landings(self) -> dict[tuple[str, str], tuple[DroneSnapshot, ...]]:
+        """Return the drones leaving each connection to land this turn."""
+        return group_by_link(
+            tuple(drone for drone in self.movers() if drone.landing),
+        )
+
+
+def link_key(zone_a: str, zone_b: str) -> tuple[str, str]:
+    """Return a direction-independent key for the connection ``a``-``b``."""
+    return (zone_a, zone_b) if zone_a <= zone_b else (zone_b, zone_a)
+
 
 def group_by_link(
     drones: tuple[DroneSnapshot, ...],
@@ -126,8 +153,7 @@ def group_by_link(
     groups: dict[tuple[str, str], list[DroneSnapshot]] = {}
     for drone in drones:
         if drone.link is not None:
-            key = (min(drone.link), max(drone.link))
-            groups.setdefault(key, []).append(drone)
+            groups.setdefault(link_key(*drone.link), []).append(drone)
     return {key: tuple(members) for key, members in groups.items()}
 
 
@@ -196,4 +222,5 @@ def _drone_at(path: DronePath, turn: int, goal: str) -> DroneSnapshot:
         zone=step.location,
         source=source,
         target=step.location,
+        landing=previous.on_connection,
     )

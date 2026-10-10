@@ -57,6 +57,10 @@ class VisualConnection:
         """Return a human-readable ``A <-> B`` label."""
         return f"{self.zone_a} <-> {self.zone_b}"
 
+    def other_end(self, zone: str) -> str:
+        """Return the endpoint opposite ``zone``."""
+        return self.zone_b if zone == self.zone_a else self.zone_a
+
 
 @dataclass(frozen=True)
 class WorldBounds:
@@ -127,6 +131,13 @@ class VisualMap:
             if zone.name == name:
                 return zone
         raise KeyError(name)
+
+    def connections_of(self, zone: str) -> tuple[VisualConnection, ...]:
+        """Return the connections touching ``zone``, in map order."""
+        return tuple(
+            connection for connection in self.connections
+            if zone in (connection.zone_a, connection.zone_b)
+        )
 
     def zone_type_counts(self) -> dict[ZoneType, int]:
         """Return how many zones the map has of each zone type."""

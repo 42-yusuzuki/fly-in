@@ -7,6 +7,7 @@ from flyin.simulation.drone_path import DronePath, DroneStep
 from flyin.simulation.simulation import Simulation
 from flyin.visualization.tui import palette
 from flyin.visualization.tui.canvas import CellCanvas
+from flyin.visualization.tui.inspection import Selectable
 from flyin.visualization.tui.model import VisualMap
 from flyin.visualization.tui.renderer import GraphRenderer, place_zones
 from flyin.visualization.tui.snapshot import TurnSnapshot, build_snapshots
@@ -116,10 +117,16 @@ def _turn(turn: int, *paths: list[tuple[str, bool]]) -> TurnSnapshot:
 
 
 def _render_turn(
-    snapshot: TurnSnapshot, width: int = 26, height: int = 3,
+    snapshot: TurnSnapshot,
+    width: int = 26,
+    height: int = 3,
+    capacity: int = 1,
+    selected: Selectable | None = None,
 ) -> CellCanvas:
-    visual = VisualMap.from_flyin_map(_linear_map(), "test")
-    return GraphRenderer(visual).render(width, height, snapshot)
+    visual = VisualMap.from_flyin_map(_linear_map(capacity=capacity), "test")
+    return GraphRenderer(visual).render(
+        width, height, snapshot, selected=selected,
+    )
 
 
 def test_waiting_drones_are_grouped_above_their_zone() -> None:
@@ -143,8 +150,39 @@ def test_single_drone_badge_shows_its_id_and_full_zone_is_emphasized() -> None:
         palette.TYPE_STYLES[ZoneType.RESTRICTED] + palette.FULL_ZONE_SUFFIX
     )
     start_x = lines[1].index("◉")
-    assert canvas.get(start_x + 1, 1).style == palette.ACTIVE_CONNECTION_STYLE
+    # One drone on a capacity-1 link fills it.
+    assert canvas.get(start_x + 1, 1).style == palette.FULL_CONNECTION_STYLE
     assert canvas.get(zone_x + 3, 1).style == palette.CONNECTION_STYLE
+
+
+def test_used_link_below_capacity_is_active_not_full() -> None:
+    path = [("start", False), ("A", False)]
+    canvas = _render_turn(_turn(1, path), width=40, capacity=2)
+    start_x = canvas.plain_lines()[1].index("◉")
+
+    assert canvas.get(start_x + 1, 1).style == palette.ACTIVE_CONNECTION_STYLE
+
+
+def test_selection_highlights_zone_and_label() -> None:
+    visual = VisualMap.from_flyin_map(_linear_map(), "test")
+    canvas = _render_turn(
+        _turn(0, [("start", False)]), selected=visual.zone("A"),
+    )
+    line = canvas.plain_lines()[1]
+    zone_x = line.index("▲")
+
+    assert canvas.get(zone_x, 1).style == palette.SELECTED_ZONE_STYLE
+    assert canvas.get(zone_x + 2, 1).style == palette.SELECTED_ZONE_STYLE
+    assert canvas.get(line.index("◉"), 1).style != palette.SELECTED_ZONE_STYLE
+
+
+def test_selected_connection_is_highlighted_over_usage() -> None:
+    visual = VisualMap.from_flyin_map(_linear_map(), "test")
+    path = [("start", False), ("A", False)]
+    canvas = _render_turn(_turn(1, path), selected=visual.connections[0])
+    start_x = canvas.plain_lines()[1].index("◉")
+
+    assert canvas.get(start_x + 1, 1).style == palette.SELECTED_CONNECTION_STYLE
 
 
 def test_transit_badge_sits_on_the_connection() -> None:

@@ -17,6 +17,10 @@ LABEL_STYLE = "#cbd5e1"
 MUTED_STYLE = "#64748b"
 HEADING_STYLE = "bold #38bdf8"
 ACTIVE_CONNECTION_STYLE = "bold #fbbf24"
+FULL_CONNECTION_STYLE = "bold #f97316"
+SELECTED_CONNECTION_STYLE = "bold #f8fafc"
+SELECTED_ZONE_STYLE = "bold #0b1120 on #f8fafc"
+FULL_STYLE = "bold #f97316"
 FULL_ZONE_SUFFIX = " reverse"
 
 # Drone badges are dark text on a colored background so they stand out

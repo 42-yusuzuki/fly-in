@@ -42,10 +42,10 @@ def build_status_text(
     start = _zone_name(visual_map, ZoneRole.START)
     end = _zone_name(visual_map, ZoneRole.END)
 
-    _heading(text, "TURN")
-    _row(text, "Turn", f"{snapshot.turn} / {total_turns}")
+    add_heading(text, "TURN")
+    add_row(text, "Turn", f"{snapshot.turn} / {total_turns}")
     if playback is not None:
-        _row(text, "Playback", playback)
+        add_row(text, "Playback", playback)
     text.append(f"{progress_bar(snapshot.turn, total_turns)}\n",
                 palette.CAPACITY_STYLE)
     _count(text, DroneActivity.WAITING, "Waiting",
@@ -58,14 +58,14 @@ def build_status_text(
            snapshot.delivered_count)
     text.append("\n")
 
-    _heading(text, "MAP")
-    _row(text, "Name", visual_map.title)
-    _row(text, "Drones", str(visual_map.drone_count))
-    _row(text, "Zones", str(len(visual_map.zones)))
-    _row(text, "Connections", str(len(visual_map.connections)))
+    add_heading(text, "MAP")
+    add_row(text, "Name", visual_map.title)
+    add_row(text, "Drones", str(visual_map.drone_count))
+    add_row(text, "Zones", str(len(visual_map.zones)))
+    add_row(text, "Connections", str(len(visual_map.connections)))
     text.append("\n")
 
-    _heading(text, "LEGEND")
+    add_heading(text, "LEGEND")
     _legend(text, palette.ROLE_GLYPHS[ZoneRole.START],
             palette.ROLE_STYLES[ZoneRole.START], "start", start)
     _legend(text, palette.ROLE_GLYPHS[ZoneRole.END],
@@ -95,7 +95,7 @@ def _count(text: Text, activity: DroneActivity, label: str, value: int) -> None:
 def _moves(text: Text, snapshot: TurnSnapshot) -> None:
     """List the drones that used a connection during this turn."""
     movers = snapshot.movers()
-    _heading(text, "MOVES")
+    add_heading(text, "MOVES")
     if not movers:
         text.append("(none)\n", palette.MUTED_STYLE)
         return
@@ -117,13 +117,17 @@ def _zone_name(visual_map: VisualMap, role: ZoneRole) -> str:
     return "-"
 
 
-def _heading(text: Text, title: str) -> None:
+def add_heading(text: Text, title: str) -> None:
+    """Append a section heading line."""
     text.append(f"{title}\n", palette.HEADING_STYLE)
 
 
-def _row(text: Text, key: str, value: str) -> None:
+def add_row(
+    text: Text, key: str, value: str, value_style: str = palette.LABEL_STYLE,
+) -> None:
+    """Append an aligned ``key value`` line."""
     text.append(f"{key:<{_KEY_WIDTH}}", palette.MUTED_STYLE)
-    text.append(f"{value}\n", palette.LABEL_STYLE)
+    text.append(f"{value}\n", value_style)
 
 
 def _legend(text: Text, glyph: str, style: str, label: str, value: str) -> None:
